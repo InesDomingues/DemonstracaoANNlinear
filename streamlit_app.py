@@ -844,9 +844,7 @@ st.set_page_config(
 st.title("📊 Exemplo: Dataset de altura e peso")
 
 st.write(
-    "Esta aplicação permite recolher dados introduzidos pelos estudantes e juntá-los "
-    "a um dataset sintético inicial. Inclui ainda um modo desafio para praticar "
-    "os passos de um exemplo supervisionado em Python."
+    "Esta aplicação permite recolher dados e juntá-los a um dataset sintético inicial."
 )
 
 nr_synthetic_samples = DEFAULT_SYNTHETIC_SAMPLES
