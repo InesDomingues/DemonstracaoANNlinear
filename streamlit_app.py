@@ -279,7 +279,6 @@ def calcular_metricas_demo_ann_linear(estado):
 
     estado["loss"] = float(loss)
     estado["acc"] = float(acc)
-    estado["y_prob"] = y_prob
 
     return estado
 
@@ -527,15 +526,8 @@ def carregar_ou_criar_dataset(n_synthetic_samples: int, seed: int) -> pd.DataFra
 def guardar_dataset(df: pd.DataFrame) -> None:
     df.to_csv(DATASET_FILE, index=False, encoding="utf-8-sig")
 
-def criar_scatter_altura_peso(df: pd.DataFrame, distinguir_origem: bool = True, plt_reg: bool = False ):
-    """Cria scatter plot: altura no eixo x, peso no eixo y, sexo nas cores.
-
-    Se distinguir_origem=True:
-    - dados sintéticos aparecem como pontos pequenos;
-    - dados reais aparecem como bolinhas preenchidas.
-
-    Inclui uma linha de regressão linear usando todos os dados.
-    """
+def criar_scatter_altura_peso(df: pd.DataFrame):
+    """Desenha altura vs. peso, separando sexo e origem dos registos."""
     cores_sexo = {
         "Feminino": "red",
         "Masculino": "blue",
@@ -543,76 +535,37 @@ def criar_scatter_altura_peso(df: pd.DataFrame, distinguir_origem: bool = True, 
 
     fig, ax = plt.subplots(figsize=(4, 3))
 
-    if distinguir_origem:
-        for sexo, cor in cores_sexo.items():
-            # Dados sintéticos: pontos pequenos
-            dados_sinteticos = df[
-                (df["sexo"] == sexo) & (df["origem"] == "Sintética")
-            ]
-
-            if len(dados_sinteticos) > 0:
-                ax.scatter(
-                    dados_sinteticos["altura_cm"],
-                    dados_sinteticos["peso_kg"],
-                    c=cor,
-                    marker=".",
-                    label=f"{sexo} - Sintética",
-                    alpha=0.1,
-                    s=1,
-                )
-
-            # Dados reais: bolinhas preenchidas
-            dados_reais = df[
-                (df["sexo"] == sexo) & (df["origem"] == "Real")
-            ]
-
-            if len(dados_reais) > 0:
-                ax.scatter(
-                    dados_reais["altura_cm"],
-                    dados_reais["peso_kg"],
-                    c=cor,
-                    marker="o",
-                    label=f"{sexo} - Real",
-                    alpha=1,
-                    edgecolors="black",
-                    linewidths=0.4,
-                    s=45,
-                )
-
-    else:
-        for sexo, cor in cores_sexo.items():
-            dados = df[df["sexo"] == sexo]
+    for sexo, cor in cores_sexo.items():
+        # Pontos sintéticos pequenos e discretos.
+        dados_sinteticos = df[
+            (df["sexo"] == sexo) & (df["origem"] == "Sintética")
+        ]
+        if len(dados_sinteticos) > 0:
             ax.scatter(
-                dados["altura_cm"],
-                dados["peso_kg"],
+                dados_sinteticos["altura_cm"],
+                dados_sinteticos["peso_kg"],
                 c=cor,
-                label=sexo,
-                alpha=0.6,
-                edgecolors="none",
-                s=15,
+                marker=".",
+                label=f"{sexo} - Sintética",
+                alpha=0.1,
+                s=1,
             )
 
-    if plt_reg:
-        # Linha de regressão usando todos os dados
-        df_reg = df[["altura_cm", "peso_kg"]].dropna()
-    
-        if len(df_reg) >= 2:
-            x = df_reg["altura_cm"].to_numpy()
-            y = df_reg["peso_kg"].to_numpy()
-    
-            coef = np.polyfit(x, y, deg=1)
-            linha = np.poly1d(coef)
-    
-            x_linha = np.linspace(x.min(), x.max(), 100)
-            y_linha = linha(x_linha)
-    
-            ax.plot(
-                x_linha,
-                y_linha,
-                color="black",
-                linestyle="--",
-                linewidth=2,
-                label="Regressão linear",
+        # Observações introduzidas: círculos preenchidos.
+        dados_reais = df[
+            (df["sexo"] == sexo) & (df["origem"] == "Real")
+        ]
+        if len(dados_reais) > 0:
+            ax.scatter(
+                dados_reais["altura_cm"],
+                dados_reais["peso_kg"],
+                c=cor,
+                marker="o",
+                label=f"{sexo} - Real",
+                alpha=1,
+                edgecolors="black",
+                linewidths=0.4,
+                s=45,
             )
 
     ax.set_xlabel("Altura (cm)")
@@ -737,7 +690,7 @@ with col_info:
 # =============================
 st.subheader("Scatter plot")
 
-fig = criar_scatter_altura_peso(df, distinguir_origem=True)
+fig = criar_scatter_altura_peso(df)
 st.pyplot(fig, use_container_width=False)
 
 # =============================
@@ -760,7 +713,6 @@ if (
 ):
     st.session_state.demo_ann_linear = inicializar_demo_ann_linear(df, seed=42)
 
-col_fig1, col_fig2 = st.columns(2)
 col_fig1, col_fig2 = st.columns([1, 1])
 
 with col_fig1:
