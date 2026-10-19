@@ -950,14 +950,6 @@ fig = criar_scatter_altura_peso(df, distinguir_origem=True)
 st.pyplot(fig, use_container_width=False)
 
 # =============================
-# Regressão
-# =============================
-st.subheader("Regressão")
-
-fig = criar_scatter_altura_peso(df, distinguir_origem=True, plt_reg=True)
-st.pyplot(fig, use_container_width=False)
-
-# =============================
 # Treino de uma rede
 # =============================
 st.divider()
