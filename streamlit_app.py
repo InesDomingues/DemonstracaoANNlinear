@@ -1,801 +1,371 @@
-from pathlib import Path
+"""Interactive educational single-neuron demonstration: hypertension vs Age & BMI.
+
+The records and their labels are entirely synthetic. This is not a diagnostic,
+screening, or clinical risk-prediction tool; actual hypertension assessment requires
+blood-pressure measurements and appropriate clinical evaluation.
+"""
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
 
-# =============================
-# Configuration
-# =============================
-DATASET_FILE = Path("adultos_portugal_streamlit.csv")
-DEFAULT_SYNTHETIC_SAMPLES = 5000
+DEFAULT_SYNTHETIC_SAMPLES = 850
 DEFAULT_SEED = 42
+MAX_TRAINING_SAMPLES = 400
 
-# =============================
-# Helper functions
-# =============================
-    
-def criar_figura_rede_ann_linear(estado):
-    """Desenha a rede neuronal linear que está a ser treinada.
+GREEN = "#24845c"
+RED = "#d14b5b"
+BLUE = "#205e9f"
 
-    Ordem visual dos neurónios de entrada:
-    1. peso_kg
-    2. altura_cm
-    3. bias
 
-    Nota:
-    O modelo usa X = ["altura_cm", "peso_kg"].
-    Por isso:
-    - w_altura = estado["w"][0, 0]
-    - w_peso = estado["w"][1, 0]
-    """
-    fig, ax = plt.subplots(figsize=(7, 4.5))
-
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    ax.axis("off")
-
-    pos_peso = (0.12, 0.78)
-    pos_altura = (0.12, 0.55)
-    pos_bias = (0.12, 0.32)
-    pos_neuronio = (0.50, 0.55)
-    pos_sigmoid = (0.70, 0.55)
-    pos_saida = (0.90, 0.55)
-
-    w_altura, w_peso, b = obter_pesos_em_unidades_originais(estado)
-
-    def espessura(valor):
-        return 1 + 3 * min(abs(valor), 2.0) / 2.0
-
-    def cor_peso(valor):
-        return "green" if valor >= 0 else "red"
-
-    # Ligações das entradas para o neurónio linear z
-    ax.annotate(
-        "",
-        xy=pos_neuronio,
-        xytext=pos_peso,
-        arrowprops=dict(
-            arrowstyle="->",
-            lw=espessura(w_peso),
-            color=cor_peso(w_peso),
-        ),
-    )
-
-    ax.annotate(
-        "",
-        xy=pos_neuronio,
-        xytext=pos_altura,
-        arrowprops=dict(
-            arrowstyle="->",
-            lw=espessura(w_altura),
-            color=cor_peso(w_altura),
-        ),
-    )
-
-    ax.annotate(
-        "",
-        xy=pos_neuronio,
-        xytext=pos_bias,
-        arrowprops=dict(
-            arrowstyle="->",
-            lw=espessura(b),
-            color=cor_peso(b),
-            linestyle="dashed",
-        ),
-    )
-
-    # Ligação z -> sigmoid -> saída
-    ax.annotate(
-        "",
-        xy=pos_sigmoid,
-        xytext=pos_neuronio,
-        arrowprops=dict(
-            arrowstyle="->",
-            lw=2,
-            color="black",
-        ),
-    )
-
-    ax.annotate(
-        "",
-        xy=pos_saida,
-        xytext=pos_sigmoid,
-        arrowprops=dict(
-            arrowstyle="->",
-            lw=2,
-            color="black",
-        ),
-    )
-
-    # Nós da rede
-    nos = [
-        (pos_peso, "peso", "lightblue"),
-        (pos_altura, "altura", "lightblue"),
-        (pos_bias, "bias", "lightgray"),
-        (pos_neuronio, "z", "khaki"),
-        (pos_sigmoid, "σ", "wheat"),
-        (pos_saida, "y_prob", "plum"),
-    ]
-
-    for (x, y), label, color in nos:
-        circle = plt.Circle(
-            (x, y),
-            0.06,
-            color=color,
-            ec="black",
-            zorder=3,
-        )
-        ax.add_patch(circle)
-        ax.text(
-            x,
-            y,
-            label,
-            ha="center",
-            va="center",
-            fontsize=9,
-            weight="bold",
-            zorder=4,
-        )
-
-    # Etiquetas dos pesos
-    ax.text(
-        0.31,
-        0.72,
-        f"w_peso = {w_peso:.4f}",
-        fontsize=9,
-        color=cor_peso(w_peso),
-        ha="center",
-    )
-
-    ax.text(
-        0.31,
-        0.57,
-        f"w_altura = {w_altura:.4f}",
-        fontsize=9,
-        color=cor_peso(w_altura),
-        ha="center",
-    )
-
-    ax.text(
-        0.31,
-        0.36,
-        f"b = {b:.4f}",
-        fontsize=9,
-        color=cor_peso(b),
-        ha="center",
-    )
-
-    # Equações
-    ax.text(
-        0.7,
-        0.4,
-        "z = w_altura·altura + w_peso·peso + b",
-        ha="center",
-        va="center",
-        fontsize=10,
-    )
-
-    ax.text(
-        0.75,
-        0.3,
-        r"$\sigma(z)=\frac{1}{1+e^{-z}}$",
-        ha="center",
-        va="center",
-        fontsize=13,
-    )
-
-    ax.text(
-        0.5,
-        0.0,
-        "Saída: probabilidade estimada de ser Masculino",
-        ha="center",
-        va="center",
-        fontsize=9,
-    )
-
-    ax.set_title(
-        f"Rede neuronal linear em treino",
-        fontsize=12,
-    )
-
-    return fig
-    
 def sigmoid(z):
+    """Stable sigmoid function for a single logistic neuron."""
     z = np.clip(z, -500, 500)
-    return 1 / (1 + np.exp(-z))
+    return 1.0 / (1.0 + np.exp(-z))
 
 
-def preparar_dados_demo_ann_linear(df: pd.DataFrame, max_amostras: int = 400):
-    """Prepara dados para ANN linear.
+def calculate_bmi(height_cm, weight_kg):
+    """Calculate BMI from height in centimetres and weight in kilograms."""
+    height_m = float(height_cm) / 100.0
+    if height_m <= 0 or float(weight_kg) <= 0:
+        raise ValueError("Height and weight must be positive.")
+    return float(weight_kg) / (height_m ** 2)
 
-    A rede treina com variáveis normalizadas,
-    mas depois convertemos os pesos para unidades originais.
+
+def generate_synthetic_dataset(n=DEFAULT_SYNTHETIC_SAMPLES, seed=DEFAULT_SEED):
+    """Generate *fictional* age, height, weight, BMI and hypertension labels.
+
+    A probability-generating formula is deliberately chosen to create a
+    learnable, imperfect relationship. It is NOT fitted to epidemiological data
+    and is NOT a diagnostic rule or a population prevalence model.
     """
-    df_demo = df[["altura_cm", "peso_kg", "sexo"]].dropna().copy()
-
-    if len(df_demo) > max_amostras:
-        df_demo = df_demo.sample(n=max_amostras, random_state=42)
-
-    X_raw = df_demo[["altura_cm", "peso_kg"]].to_numpy(dtype=float)
-    y = (df_demo["sexo"] == "Masculino").astype(float).to_numpy().reshape(-1, 1)
-
-    mu = X_raw.mean(axis=0, keepdims=True)
-    sigma = X_raw.std(axis=0, keepdims=True)
-    sigma[sigma == 0] = 1.0
-
-    X = (X_raw - mu) / sigma
-
-    return X, y, X_raw, mu, sigma
-
-
-def obter_pesos_em_unidades_originais(estado):
-    """Converte os pesos aprendidos em variáveis normalizadas
-    para uma equação nas unidades originais.
-
-    Modelo interno:
-        z = w1 * altura_norm + w2 * peso_norm + b
-
-    Equivalente em unidades originais:
-        z = w_altura * altura_cm + w_peso * peso_kg + b_original
-    """
-    w_norm = estado["w"]
-    b_norm = float(estado["b"][0, 0])
-
-    mu_altura = estado["mu"][0, 0]
-    mu_peso = estado["mu"][0, 1]
-
-    sd_altura = estado["sigma"][0, 0]
-    sd_peso = estado["sigma"][0, 1]
-
-    w_altura = float(w_norm[0, 0] / sd_altura)
-    w_peso = float(w_norm[1, 0] / sd_peso)
-
-    b_original = (
-        b_norm
-        - float(w_norm[0, 0] * mu_altura / sd_altura)
-        - float(w_norm[1, 0] * mu_peso / sd_peso)
-    )
-
-    return w_altura, w_peso, b_original
-
-
-def calcular_metricas_demo_ann_linear(estado):
-    """Calcula loss e accuracy."""
-    X = estado["X"]
-    y = estado["y"]
-
-    z = X @ estado["w"] + estado["b"]
-    y_prob = sigmoid(z)
-
-    eps = 1e-8
-    loss = -np.mean(
-        y * np.log(y_prob + eps) + (1 - y) * np.log(1 - y_prob + eps)
-    )
-
-    y_pred = (y_prob >= 0.5).astype(int)
-    acc = np.mean(y_pred == y)
-
-    estado["loss"] = float(loss)
-    estado["acc"] = float(acc)
-
-    return estado
-
-
-def inicializar_demo_ann_linear(df: pd.DataFrame, seed: int = 42):
-    """Inicializa a ANN linear."""
     rng = np.random.default_rng(seed)
+    age = rng.integers(18, 86, size=n)
+    desired_bmi = np.clip(rng.normal(25.8 + 0.052 * (age - 45), 4.6), 17.0, 43.0)
+    # Create fictional measurements first; derive BMI exactly as for audience inputs.
+    height_cm = np.round(np.clip(rng.normal(170, 9, size=n), 145, 200), 1)
+    weight_kg = np.round(desired_bmi * (height_cm / 100.0) ** 2, 1)
+    bmi = np.round(weight_kg / (height_cm / 100.0) ** 2, 1)
 
-    X, y, X_raw, mu, sigma = preparar_dados_demo_ann_linear(df)
+    # Deliberately invented for the educational simulation.
+    synthetic_logit = -0.7 + 0.060 * (age - 50) + 0.145 * (bmi - 27)
+    p_yes = sigmoid(synthetic_logit)
+    hypertension = np.where(rng.random(n) < p_yes, "Yes", "No")
 
-    x_min = float(X_raw[:, 0].min() - 5)
-    x_max = float(X_raw[:, 0].max() + 5)
-    y_min = float(X_raw[:, 1].min() - 8)
-    y_max = float(X_raw[:, 1].max() + 8)
+    return pd.DataFrame(
+        {
+            "Age": age.astype(int),
+            "Height (cm)": height_cm,
+            "Weight (kg)": weight_kg,
+            "BMI": bmi,
+            "Hypertension": hypertension,
+            "Source": "Synthetic",
+        }
+    )
 
-    estado = {
-        "X": X,
+
+def prepare_training_data(df, max_samples=MAX_TRAINING_SAMPLES):
+    """Use Age/BMI as features and Hypertension (Yes=1, No=0) as target."""
+    valid = df[["Age", "BMI", "Hypertension"]].dropna().copy()
+    valid = valid[valid["Hypertension"].isin(["Yes", "No"])]
+    if len(valid) < 2 or valid["Hypertension"].nunique() < 2:
+        raise ValueError("At least two observations, including both classes, are required.")
+    if len(valid) > max_samples:
+        valid = valid.sample(n=max_samples, random_state=42)
+
+    x_raw = valid[["Age", "BMI"]].to_numpy(dtype=float)
+    y = (valid["Hypertension"] == "Yes").astype(float).to_numpy().reshape(-1, 1)
+    mu = x_raw.mean(axis=0, keepdims=True)
+    sigma = x_raw.std(axis=0, keepdims=True)
+    sigma[sigma == 0] = 1.0
+    x = (x_raw - mu) / sigma
+    return x, y, x_raw, mu, sigma
+
+
+def original_scale_weights(state):
+    """Return coefficients (Age in years, BMI in kg/m², intercept)."""
+    w_norm = state["w"].reshape(-1)
+    mu = state["mu"].reshape(-1)
+    sd = state["sigma"].reshape(-1)
+    w_orig = w_norm / sd
+    intercept = float(state["b"][0, 0] - np.sum(w_orig * mu))
+    return float(w_orig[0]), float(w_orig[1]), intercept
+
+
+def update_metrics(state):
+    z = state["X"] @ state["w"] + state["b"]
+    p = sigmoid(z)
+    y = state["y"]
+    eps = 1e-9
+    loss = -np.mean(y * np.log(p + eps) + (1 - y) * np.log(1 - p + eps))
+    acc = np.mean((p >= 0.5) == (y >= 0.5))
+    state["loss"] = float(loss)
+    state["accuracy"] = float(acc)
+    return state
+
+
+def initialize_network(df, seed=42):
+    rng = np.random.default_rng(seed)
+    x, y, x_raw, mu, sigma = prepare_training_data(df)
+    state = {
+        "X": x,
         "y": y,
-        "X_raw": X_raw,
+        "X_raw": x_raw,
         "mu": mu,
         "sigma": sigma,
         "w": rng.normal(0, 0.5, size=(2, 1)),
         "b": np.zeros((1, 1)),
         "epoch": 0,
-        "x_min": x_min,
-        "x_max": x_max,
-        "y_min": y_min,
-        "y_max": y_max,
+        "age_min": 18.0,
+        "age_max": 85.0,
+        "bmi_min": 17.0,
+        "bmi_max": 43.0,
     }
-
-    estado = calcular_metricas_demo_ann_linear(estado)
-    return estado
+    return update_metrics(state)
 
 
-def treinar_uma_iteracao_demo_ann_linear(estado, lr: float = 0.3):
-    """Treina a ANN linear durante uma iteração."""
-    X = estado["X"]
-    y = estado["y"]
-    w = estado["w"]
-    b = estado["b"]
+def train_iteration(state, learning_rate=0.3):
+    """One full-batch gradient descent step for binary cross-entropy."""
+    x, y = state["X"], state["y"]
+    p = sigmoid(x @ state["w"] + state["b"])
+    residual = p - y
+    gradient_w = (x.T @ residual) / len(y)
+    gradient_b = np.mean(residual, keepdims=True)
+    state["w"] = state["w"] - learning_rate * gradient_w
+    state["b"] = state["b"] - learning_rate * gradient_b
+    state["epoch"] += 1
+    return update_metrics(state)
 
-    m = X.shape[0]
 
-    z = X @ w + b
-    y_prob = sigmoid(z)
+def draw_decision_boundary(ax, state):
+    w_age, w_bmi, b = original_scale_weights(state)
+    ages = np.linspace(state["age_min"], state["age_max"], 300)
+    if abs(w_bmi) > 1e-10:
+        bmis = -(w_age * ages + b) / w_bmi
+        ax.plot(ages, bmis, "--", color="black", lw=2, label="Decision boundary (p = 0.5)")
+    elif abs(w_age) > 1e-10:
+        ax.axvline(-b / w_age, color="black", ls="--", lw=2, label="Decision boundary (p = 0.5)")
 
-    dz = y_prob - y
-    dw = (X.T @ dz) / m
-    db = np.mean(dz, keepdims=True)
 
-    estado["w"] = w - lr * dw
-    estado["b"] = b - lr * db
-    estado["epoch"] += 1
-
-    estado = calcular_metricas_demo_ann_linear(estado)
-    return estado
-
-def criar_figura_demo_ann_linear(estado):
-    """Cria figura com dados e recta de decisão da ANN linear.
-
-    A recta é desenhada nas unidades originais:
-    z = w_altura * altura_cm + w_peso * peso_kg + b
-
-    Internamente, o treino usa dados normalizados, mas os pesos são convertidos
-    para unidades originais para facilitar a interpretação.
-    """
-    X_raw = estado["X_raw"]
-    y = estado["y"].ravel()
-
-    fig, ax = plt.subplots(figsize=(5, 4))
-
-    femininos = X_raw[y == 0]
-    masculinos = X_raw[y == 1]
-
-    if len(femininos) > 0:
-        ax.scatter(
-            femininos[:, 0],
-            femininos[:, 1],
-            c="red",
-            label="Feminino",
-            alpha=0.6,
-            s=18,
-        )
-
-    if len(masculinos) > 0:
-        ax.scatter(
-            masculinos[:, 0],
-            masculinos[:, 1],
-            c="blue",
-            label="Masculino",
-            alpha=0.6,
-            s=18,
-        )
-
-    # Limites fixos para o zoom não mudar
-    x_min = estado["x_min"]
-    x_max = estado["x_max"]
-    y_min = estado["y_min"]
-    y_max = estado["y_max"]
-
-    ax.set_xlim(x_min, x_max)
-    ax.set_ylim(y_min, y_max)
-
-    # Recta de decisão convertida para unidades originais
-    w_altura, w_peso, b_original = obter_pesos_em_unidades_originais(estado)
-
-    x_vals = np.linspace(x_min, x_max, 200)
-
-    if abs(w_peso) > 1e-12:
-        y_vals = -(w_altura * x_vals + b_original) / w_peso
-
-        ax.plot(
-            x_vals,
-            y_vals,
-            color="black",
-            linestyle="--",
-            linewidth=2,
-            label="Recta de decisão",
-        )
-    else:
-        if abs(w_altura) > 1e-12:
-            x_vertical = -b_original / w_altura
-            ax.axvline(
-                x=x_vertical,
-                color="black",
-                linestyle="--",
-                linewidth=2,
-                label="Recta de decisão",
-            )
-
-    ax.set_xlabel("Altura (cm)")
-    ax.set_ylabel("Peso (kg)")
-    ax.set_title(
-        f"ANN linear | iteração = {estado['epoch']} | "
-        f"loss = {estado['loss']:.3f} | acc = {estado['acc']:.3f}"
-    )
-    ax.grid(True, alpha=0.3)
-    ax.legend(fontsize=8)
-
-    return fig
-    
-def classificar_imc(valor: float) -> str:
-    """Classifica o IMC de acordo com as categorias habituais da OMS."""
-    if valor < 18.5:
-        return "Baixo peso"
-    if valor < 25:
-        return "Peso normal"
-    if valor < 30:
-        return "Excesso de peso"
-    return "Obesidade"
-
-def gerar_dataset_sintetico_adultos_portugal(
-    n: int = DEFAULT_SYNTHETIC_SAMPLES,
-    seed: int = DEFAULT_SEED,
-) -> pd.DataFrame:
-    """Gera um dataset sintético simples de adultos em Portugal.
-
-    Nota: os dados são simulados e servem apenas para fins pedagógicos.
-    """
-    rng = np.random.default_rng(seed)
-
-    idade = rng.integers(18, 86, size=n)
-
-    sexo = rng.choice(
-        ["Feminino", "Masculino"],
-        size=n,
-        p=[0.52, 0.48],
-    )
-
-    altura_cm = np.zeros(n)
-
-    for i in range(n):
-        if sexo[i] == "Feminino":
-            altura_cm[i] = rng.normal(loc=162, scale=3.0)
-        else:
-            altura_cm[i] = rng.normal(loc=174, scale=3.5)
-
-    altura_cm = np.clip(altura_cm, 140, 205)
-
-    categoria_imc = rng.choice(
-        ["Baixo peso", "Peso normal", "Excesso de peso", "Obesidade"],
-        size=n,
-        p=[0.02, 0.38, 0.38, 0.22],
-    )
-
-    imc = np.zeros(n)
-
-    for i in range(n):
-        if categoria_imc[i] == "Baixo peso":
-            imc[i] = rng.normal(loc=17.8, scale=0.7)
-        elif categoria_imc[i] == "Peso normal":
-            imc[i] = rng.normal(loc=22.5, scale=1.7)
-        elif categoria_imc[i] == "Excesso de peso":
-            imc[i] = rng.normal(loc=27.2, scale=1.4)
-        else:
-            imc[i] = rng.normal(loc=33.0, scale=3.2)
-
-    imc = np.clip(imc, 15, 50)
-
-    altura_m = altura_cm / 100
-    peso_kg = imc * (altura_m**2)
-    peso_kg = peso_kg + rng.normal(loc=0, scale=1.5, size=n)
-    peso_kg = np.clip(peso_kg, 40, 180)
-
-    imc_final = peso_kg / (altura_m**2)
-    categoria_imc_final = [classificar_imc(x) for x in imc_final]
-
-    df = pd.DataFrame(
-        {
-            "id": range(1, n + 1),
-            "idade": idade,
-            "sexo": sexo,
-            "altura_cm": np.round(altura_cm, 1),
-            "peso_kg": np.round(peso_kg, 1),
-            "imc": np.round(imc_final, 1),
-            "categoria_imc": categoria_imc_final,
-            "origem": "Sintética",
-        }
-    )
-
-    return df
-
-def carregar_ou_criar_dataset(n_synthetic_samples: int, seed: int) -> pd.DataFrame:
-    """Carrega o CSV existente ou cria um dataset sintético inicial."""
-    if DATASET_FILE.exists():
-        df = pd.read_csv(DATASET_FILE)
-
-        # Compatibilidade com versões antigas do ficheiro.
-        if "origem" not in df.columns:
-            df["origem"] = np.where(
-                df.index < n_synthetic_samples,
-                "Sintética",
-                "Real",
-            )
-
-        return df
-
-    df = gerar_dataset_sintetico_adultos_portugal(
-        n=n_synthetic_samples,
-        seed=seed,
-    )
-    df.to_csv(DATASET_FILE, index=False, encoding="utf-8-sig")
-    return df
-
-def guardar_dataset(df: pd.DataFrame) -> None:
-    df.to_csv(DATASET_FILE, index=False, encoding="utf-8-sig")
-
-def criar_scatter_altura_peso(df: pd.DataFrame):
-    """Desenha altura vs. peso, separando sexo e origem dos registos."""
-    cores_sexo = {
-        "Feminino": "red",
-        "Masculino": "blue",
-    }
-
-    fig, ax = plt.subplots(figsize=(4, 3))
-
-    for sexo, cor in cores_sexo.items():
-        # Pontos sintéticos pequenos e discretos.
-        dados_sinteticos = df[
-            (df["sexo"] == sexo) & (df["origem"] == "Sintética")
-        ]
-        if len(dados_sinteticos) > 0:
-            ax.scatter(
-                dados_sinteticos["altura_cm"],
-                dados_sinteticos["peso_kg"],
-                c=cor,
-                marker=".",
-                label=f"{sexo} - Sintética",
-                alpha=0.1,
-                s=1,
-            )
-
-        # Observações introduzidas: círculos preenchidos.
-        dados_reais = df[
-            (df["sexo"] == sexo) & (df["origem"] == "Real")
-        ]
-        if len(dados_reais) > 0:
-            ax.scatter(
-                dados_reais["altura_cm"],
-                dados_reais["peso_kg"],
-                c=cor,
-                marker="o",
-                label=f"{sexo} - Real",
-                alpha=1,
-                edgecolors="black",
-                linewidths=0.4,
-                s=45,
-            )
-
-    ax.set_xlabel("Altura (cm)")
-    ax.set_ylabel("Peso (kg)")
-    ax.set_title("Altura vs peso por sexo")
-    ax.grid(True, alpha=0.3)
-    ax.legend(fontsize=7)
-
+def draw_scatter(df, state=None, compact=False):
+    fig, ax = plt.subplots(figsize=(6.0, 4.5) if compact else (6.7, 4.5))
+    for label, color in [("No", GREEN), ("Yes", RED)]:
+        subset = df[(df["Hypertension"] == label) & (df["Source"] == "Synthetic")]
+        if not subset.empty:
+            ax.scatter(subset["Age"], subset["BMI"], s=13, alpha=0.36, color=color,
+                       edgecolors="none", label=f"Hypertension: {label}")
+        hypothetical = df[(df["Hypertension"] == label) & (df["Source"] == "Hypothetical")]
+        if not hypothetical.empty:
+            ax.scatter(hypothetical["Age"], hypothetical["BMI"], s=85, alpha=1.0,
+                       color=color, edgecolors="#202833", linewidths=1.2, marker="o",
+                       label=f"Hypothetical: {label}")
+    if state is not None:
+        draw_decision_boundary(ax, state)
+    ax.set_xlim(18, 85)
+    ax.set_ylim(17, 43)
+    ax.set_xlabel("Age (years)")
+    ax.set_ylabel("BMI (kg/m²)")
+    ax.set_title("Synthetic hypertension data" if state is None else
+                 f"Training step {state['epoch']}  |  Loss {state['loss']:.3f}  |  Training accuracy {state['accuracy']:.1%}")
+    ax.grid(True, alpha=0.22)
+    ax.legend(fontsize=8, loc="upper left")
+    fig.tight_layout()
     return fig
 
-# =============================
-# Streamlit app
-# =============================
-st.set_page_config(
-    page_title="Exemplo: Dataset de altura e peso",
-    page_icon="📊",
-    layout="wide",
-)
 
-st.title("📊 Exemplo: Dataset de altura e peso")
+def draw_neuron(state):
+    """Draw the two inputs and their changing linear coefficients."""
+    fig, ax = plt.subplots(figsize=(7.0, 4.4))
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.axis("off")
 
-st.write(
-    "Esta aplicação permite recolher dados e juntá-los a um dataset sintético inicial."
-)
+    nodes = [
+        ((0.12, 0.79), "Age", "#d9efff"),
+        ((0.12, 0.55), "BMI", "#d9efff"),
+        ((0.12, 0.31), "Bias", "#e1e4e8"),
+        ((0.51, 0.55), "z", "#f7e6a2"),
+        ((0.72, 0.55), "σ", "#f5dcbd"),
+        ((0.91, 0.55), "P(Yes)", "#ebd9f7"),
+    ]
+    w_age, w_bmi, b = original_scale_weights(state)
 
-nr_synthetic_samples = DEFAULT_SYNTHETIC_SAMPLES
-seed = DEFAULT_SEED
+    def edge(start, end, value=None, dashed=False):
+        color = "#238a5c" if value is not None and value >= 0 else "#c84954" if value is not None else "#303844"
+        lw = 1.8 if value is None else 1.2 + min(abs(value), 2) * 1.5
+        ax.annotate("", xy=end, xytext=start, arrowprops={"arrowstyle": "->", "lw": lw,
+                                                            "color": color, "linestyle": "--" if dashed else "-"})
 
-df = carregar_ou_criar_dataset(nr_synthetic_samples, seed)
+    edge(nodes[0][0], nodes[3][0], w_age)
+    edge(nodes[1][0], nodes[3][0], w_bmi)
+    edge(nodes[2][0], nodes[3][0], b, dashed=True)
+    edge(nodes[3][0], nodes[4][0])
+    edge(nodes[4][0], nodes[5][0])
 
-# Garante ids válidos, caso o utilizador altere manualmente o CSV.
-if "id" not in df.columns:
-    df.insert(0, "id", range(1, len(df) + 1))
+    for (x, y), label, color in nodes:
+        circ = plt.Circle((x, y), 0.062, fc=color, ec="#374151", zorder=3)
+        ax.add_patch(circ)
+        ax.text(x, y, label, ha="center", va="center", fontsize=10 if label != "P(Yes)" else 8,
+                weight="bold", zorder=4)
 
-# =============================
-# Data collection
-# =============================
-col_form, col_info = st.columns([1, 1])
+    for y, value, prefix in [(0.75, w_age, "w_age"), (0.60, w_bmi, "w_bmi"), (0.35, b, "b")]:
+        ax.text(0.30, y, f"{prefix} = {value:+.4f}", ha="center", fontsize=9,
+                color="#238a5c" if value >= 0 else "#c84954")
+    ax.text(0.67, 0.39, "z = w_age × Age + w_bmi × BMI + b", ha="center", fontsize=10)
+    ax.text(0.72, 0.29, r"$\sigma(z)=\frac{1}{1+e^{-z}}$", ha="center", fontsize=13)
+    ax.text(0.5, 0.08, "Output: estimated probability of Hypertension = Yes",
+            ha="center", fontsize=10, weight="bold")
+    ax.set_title("Single-neuron model · weights change during training", fontsize=12)
+    fig.tight_layout()
+    return fig
 
-with col_form:
-    st.subheader("Adicionar nova observação")
 
-    with st.form("student_form"):
-        idade = st.number_input(
-            "Idade",
-            min_value=18,
-            max_value=100,
-            value=20,
-            step=1,
-        )
+# -----------------------------
+# App and state
+# -----------------------------
+st.set_page_config(page_title="Age + BMI → Hypertension | ANN demonstration", page_icon="🧠", layout="wide")
+st.title("🧠 How does a neural network learn? Age + BMI → Hypertension")
+st.write("Enter **Age, Height and Weight**. The app calculates **BMI = Weight (kg) / Height (m)²** automatically. The neuron then uses only **Age and BMI** as its two input features to predict a simulated label: **Hypertension (Yes / No)**.")
+st.warning("**Educational simulation — not a clinical prediction tool.** All initial records and their hypertension labels are invented. Age and BMI alone cannot diagnose hypertension; diagnosis requires blood-pressure assessment. Please use hypothetical examples only, not anyone’s real medical information.")
 
-        sexo = st.selectbox(
-            "Sexo",
-            ["Feminino", "Masculino"],
-        )
+if "demo_dataset" not in st.session_state:
+    st.session_state.demo_dataset = generate_synthetic_dataset()
+    st.session_state.dataset_version = 0
 
-        altura_cm = st.number_input(
-            "Altura (cm)",
-            min_value=120.0,
-            max_value=220.0,
-            value=170.0,
-            step=0.1,
-        )
 
-        peso_kg = st.number_input(
-            "Peso (kg)",
-            min_value=35.0,
-            max_value=220.0,
-            value=70.0,
-            step=0.1,
-        )
+df = st.session_state.demo_dataset
 
-        submitted = st.form_submit_button("Adicionar ao dataset")
+with st.expander("How were the synthetic data generated?", expanded=False):
+    st.markdown("""
+    **Age** is simulated between 18 and 85 years. Fictional **Height (cm)** and **Weight (kg)** are generated, and **BMI** is calculated from them using the same formula as for the participant inputs. A deliberately invented probability formula is used to generate the binary **Hypertension** label, with randomness so that classes overlap.
+
+    This formula is **not based on a clinical cohort, guidelines or European population prevalence**, and the demonstration must not be used for personal health assessment.
+
+    The logistic neuron learns its own parameters from the simulated examples rather than receiving the original generating formula.
+    """)
+
+st.subheader("1 · Explore the dataset")
+col_add, col_summary = st.columns([1, 1])
+with col_add:
+    st.markdown("**Add a fictional case (optional)**")
+    with st.form("add_case", clear_on_submit=False):
+        c1, c2, c3 = st.columns(3)
+        age_new = c1.number_input("Age (years)", min_value=18, max_value=85, value=50, step=1)
+        height_new = c2.number_input("Height (cm)", min_value=140.0, max_value=210.0, value=170.0, step=1.0)
+        weight_new = c3.number_input("Weight (kg)", min_value=40.0, max_value=180.0, value=78.0, step=0.5)
+        label_new = st.selectbox("Fictional label: Hypertension", ["No", "Yes"])
+        st.caption("BMI is calculated automatically after submission; only Age and BMI are used as model features.")
+        submitted = st.form_submit_button("Add hypothetical case")
 
     if submitted:
-        altura_m = altura_cm / 100
-        imc = peso_kg / (altura_m**2)
-        categoria_imc = classificar_imc(imc)
+        bmi_new = round(calculate_bmi(height_new, weight_new), 1)
+        if not 17.0 <= bmi_new <= 43.0:
+            st.error(f"Calculated BMI: {bmi_new:.1f} kg/m². Please choose hypothetical measurements resulting in BMI between 17 and 43 for this simulation.")
+        else:
+            new_row = pd.DataFrame([{"Age": int(age_new),
+                                     "Height (cm)": float(height_new),
+                                     "Weight (kg)": float(weight_new),
+                                     "BMI": bmi_new,
+                                     "Hypertension": label_new, "Source": "Hypothetical"}])
+            st.session_state.demo_dataset = pd.concat([df, new_row], ignore_index=True)
+            st.session_state.dataset_version += 1
+            st.success(f"BMI = {float(weight_new):.1f} / ({float(height_new)/100:.2f})² = {bmi_new:.1f} kg/m². Case added. Training will restart with the updated dataset.")
+            st.rerun()
 
-        new_id = int(df["id"].max()) + 1 if len(df) > 0 else 1
-
-        new_row = pd.DataFrame(
-            [
-                {
-                    "id": new_id,
-                    "idade": int(idade),
-                    "sexo": sexo,
-                    "altura_cm": round(float(altura_cm), 1),
-                    "peso_kg": round(float(peso_kg), 1),
-                    "imc": round(float(imc), 1),
-                    "categoria_imc": categoria_imc,
-                    "origem": "Real",
-                }
-            ]
-        )
-
-        df = pd.concat([df, new_row], ignore_index=True)
-        guardar_dataset(df)
-
-        st.success("Observação adicionada com sucesso.")
-        st.write(f"IMC: **{imc:.1f}**")
-        st.write(f"Categoria de IMC: **{categoria_imc}**")
-
-with col_info:
-    st.subheader("Resumo")
-
+with col_summary:
     total = len(df)
-    n_sinteticas = int((df["origem"] == "Sintética").sum())
-    n_reais = int((df["origem"] == "Real").sum())
+    yes = int((df["Hypertension"] == "Yes").sum())
+    no = total - yes
+    h = int((df["Source"] == "Hypothetical").sum())
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Cases", f"{total:,}")
+    c2.metric("Yes (simulated)", f"{yes}")
+    c3.metric("No (simulated)", f"{no}")
+    st.caption(f"{h} hypothetical cases entered in this browser session. No files are written or uploaded.")
+    if st.button("Reset fictional dataset"):
+        st.session_state.demo_dataset = generate_synthetic_dataset()
+        st.session_state.dataset_version += 1
+        st.rerun()
 
-    metric_col1, metric_col2, metric_col3 = st.columns(3)
-    metric_col1.metric("Total", total)
-    metric_col2.metric("Sintéticas", n_sinteticas)
-    metric_col3.metric("Reais", n_reais)
+with st.expander("View example rows", expanded=False):
+    st.dataframe(df.head(12), use_container_width=True, hide_index=True)
 
-    st.write("Distribuição por sexo")
-    dist_sexo = df["sexo"].value_counts().rename_axis("sexo").reset_index(name="n")
-    st.dataframe(dist_sexo, use_container_width=True)
-
-# =============================
-# Scatter plot
-# =============================
-st.subheader("Scatter plot")
-
-fig = criar_scatter_altura_peso(df)
+fig = draw_scatter(df)
 st.pyplot(fig, use_container_width=False)
+plt.close(fig)
 
-# =============================
-# Treino de uma rede
-# =============================
 st.divider()
+st.subheader("2 · Train the model step by step")
+st.write("One sigmoid neuron computes **z = w_age × Age + w_bmi × BMI + b** and outputs **P(Hypertension = Yes) = sigmoid(z)**. Age and BMI are standardised for training; displayed coefficients are converted back to original units. The **decision boundary is a straight line**.")
 
-st.header("Intuição: como é que um modelo aprende?")
+if ("model_state" not in st.session_state or
+        st.session_state.get("model_dataset_version") != st.session_state.dataset_version):
+    st.session_state.model_state = initialize_network(df)
+    st.session_state.model_dataset_version = st.session_state.dataset_version
 
-st.write(
-    "Esta demonstração usa uma rede neuronal muito simples: um único neurónio com ativação sigmoid. "
-    "Como só tem uma combinação linear de altura e peso, a fronteira de decisão é sempre uma recta. "
-    "A cada clique, os pesos são atualizados e a recta muda de posição."
-)
+col_plot, col_network = st.columns([1, 1])
+with col_plot:
+    state = st.session_state.model_state
+    fig = draw_scatter(pd.DataFrame({"Age": state["X_raw"][:, 0],
+                                     "BMI": state["X_raw"][:, 1],
+                                     "Hypertension": np.where(state["y"].ravel() == 1, "Yes", "No"),
+                                     "Source": "Synthetic"}), state=state, compact=True)
+    st.pyplot(fig, use_container_width=True)
+    plt.close(fig)
 
-if (
-    "demo_ann_linear" not in st.session_state
-    or "mu" not in st.session_state.demo_ann_linear
-    or "sigma" not in st.session_state.demo_ann_linear
-):
-    st.session_state.demo_ann_linear = inicializar_demo_ann_linear(df, seed=42)
-
-col_fig1, col_fig2 = st.columns([1, 1])
-
-with col_fig1:
-    fig_demo_ann = criar_figura_demo_ann_linear(st.session_state.demo_ann_linear)
-    st.pyplot(fig_demo_ann, use_container_width=False)
-
-    col_b1, col_b2, col_b3 = st.columns(3)
-
-    with col_b1:
-        if st.button("Treinar +1 iteração"):
-            st.session_state.demo_ann_linear = treinar_uma_iteracao_demo_ann_linear(
-                st.session_state.demo_ann_linear,
-                lr=0.3,
-            )
+    b1, b2, b3 = st.columns(3)
+    with b1:
+        if st.button("Train +1 step", use_container_width=True):
+            st.session_state.model_state = train_iteration(st.session_state.model_state)
             st.rerun()
-
-    with col_b2:
-        if st.button("Treinar +10 iterações"):
+    with b2:
+        if st.button("Train +10 steps", use_container_width=True):
             for _ in range(10):
-                st.session_state.demo_ann_linear = treinar_uma_iteracao_demo_ann_linear(
-                    st.session_state.demo_ann_linear,
-                    lr=0.3,
-                )
+                st.session_state.model_state = train_iteration(st.session_state.model_state)
+            st.rerun()
+    with b3:
+        if st.button("Restart weights", use_container_width=True):
+            random_seed = int(np.random.default_rng().integers(1, 10000000))
+            st.session_state.model_state = initialize_network(df, seed=random_seed)
             st.rerun()
 
-    with col_b3:
-        if st.button("Reiniciar ANN aleatória"):
-            nova_seed = np.random.randint(0, 100000)
-            st.session_state.demo_ann_linear = inicializar_demo_ann_linear(
-                df,
-                seed=nova_seed,
-            )
-            st.rerun()
+with col_network:
+    fig = draw_neuron(st.session_state.model_state)
+    st.pyplot(fig, use_container_width=True)
+    plt.close(fig)
+    st.caption("Green arrows: positive coefficients. Red arrows: negative coefficients. The numbers update as the neuron trains.")
 
-with col_fig2:
-    fig_rede = criar_figura_rede_ann_linear(st.session_state.demo_ann_linear)
-    st.pyplot(fig_rede, use_container_width=False)
+st.info("**Training accuracy** is measured on the same examples used to update the neuron. It is not a validated estimate of performance on new patients. The purpose is to visualise learning and the decision boundary.")
 
-st.subheader("Testar uma nova pessoa")
+st.divider()
+st.subheader("3 · Enter Age, Height and Weight for a hypothetical case")
+ca, cb, cc = st.columns(3)
+with ca:
+    test_age = st.slider("Age (years)", min_value=18, max_value=85, value=55, step=1)
+with cb:
+    test_height = st.slider("Height (cm)", min_value=140, max_value=210, value=170, step=1)
+with cc:
+    test_weight = st.slider("Weight (kg)", min_value=40.0, max_value=180.0, value=84.0, step=0.5)
 
-col_input_1, col_input_2 = st.columns(2)
+test_bmi = round(calculate_bmi(test_height, test_weight), 1)
+st.info(f"**Automatic feature engineering:** BMI = {test_weight:.1f} kg / ({test_height / 100:.2f} m)² = **{test_bmi:.1f} kg/m²**. The model receives **Age = {test_age}** and **BMI = {test_bmi:.1f}**; it does not receive Height or Weight as separate inputs.")
+if not 17.0 <= test_bmi <= 43.0:
+    st.warning("Calculated BMI is outside the range of the synthetic training examples (approximately 17–43 kg/m²). The model is extrapolating; this demonstration must not be interpreted clinically.")
 
-with col_input_1:
-    altura_nova = st.number_input(
-        "Altura da nova pessoa (cm)",
-        min_value=120.0,
-        max_value=220.0,
-        value=160.0,
-        step=0.1,
-        key="altura_nova_ann",
-    )
-
-with col_input_2:
-    peso_novo = st.number_input(
-        "Peso da nova pessoa (kg)",
-        min_value=35.0,
-        max_value=220.0,
-        value=80.0,
-        step=0.1,
-        key="peso_novo_ann",
-    )
-
-estado = st.session_state.demo_ann_linear
-
-w_altura, w_peso, b = obter_pesos_em_unidades_originais(estado)
-
-z_novo = w_altura * altura_nova + w_peso * peso_novo + b
-prob_masculino = float(sigmoid(z_novo))
-prob_feminino = 1 - prob_masculino
-
-st.write("Cálculo da rede:")
+state = st.session_state.model_state
+w_age, w_bmi, b = original_scale_weights(state)
+z = w_age * test_age + w_bmi * test_bmi + b
+p_yes = float(sigmoid(z))
+p_no = 1 - p_yes
 
 st.code(
-    f"z = ({w_altura:.6f} × {altura_nova:.1f}) "
-    f"+ ({w_peso:.6f} × {peso_novo:.1f}) "
-    f"+ ({b:.6f})\n"
-    f"z = {z_novo:.6f}\n"
-    f"P(Masculino) = sigmoid(z) = {prob_masculino:.4f}\n"
-    f"P(Feminino) = 1 - P(Masculino) = {prob_feminino:.4f}",
+    f"z = ({w_age:.5f} × {test_age}) + ({w_bmi:.5f} × {test_bmi:.1f}) + ({b:.5f})\n"
+    f"z = {z:.5f}\n"
+    f"P(Hypertension = Yes) = sigmoid(z) = {p_yes:.3f}\n"
+    f"P(Hypertension = No) = 1 − P(Yes) = {p_no:.3f}",
     language="text",
 )
-
-if prob_masculino >= 0.5:
-    st.success(f"Classe prevista: Masculino ({prob_masculino:.1%})")
-else:
-    st.success(f"Classe prevista: Feminino ({prob_feminino:.1%})")
+st.metric("Simulated model output: P(Yes)", f"{p_yes:.1%}")
+st.markdown(f"**Predicted class (threshold 0.50): {'Yes' if p_yes >= 0.5 else 'No'}**")
+st.caption("Illustrative model probability only — not a diagnosis and not an individual's calibrated risk of hypertension. The participant inputs Height and Weight are used only to calculate the BMI feature.")
