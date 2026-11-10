@@ -14,6 +14,11 @@ DEFAULT_SYNTHETIC_SAMPLES = 850
 DEFAULT_SEED = 42
 MAX_TRAINING_SAMPLES = 400
 
+# Pedagogical setting: smaller values give more clearly separable classes.
+# 0.22 = clear boundary with a few ambiguous cases; 0.60 = more overlap.
+SYNTHETIC_BOUNDARY_NOISE = 0.22
+SYNTHETIC_DATA_VERSION = "clear-separation-age-bmi-v1"
+
 GREEN = "#24845c"
 RED = "#d14b5b"
 BLUE = "#205e9f"
@@ -34,24 +39,29 @@ def calculate_bmi(height_cm, weight_kg):
 
 
 def generate_synthetic_dataset(n=DEFAULT_SYNTHETIC_SAMPLES, seed=DEFAULT_SEED):
-    """Generate *fictional* age, height, weight, BMI and hypertension labels.
+    """Generate clearly separable *fictional* hypertension cases.
 
-    A probability-generating formula is deliberately chosen to create a
-    learnable, imperfect relationship. It is NOT fitted to epidemiological data
-    and is NOT a diagnostic rule or a population prevalence model.
+    Age, height and weight are simulated; BMI is calculated from height and
+    weight. Labels are assigned using an INVENTED approximately linear boundary
+    in Age/BMI space, with limited noise near that boundary. This makes it easy
+    to watch a single neuron learn. The rule is NOT derived from patients,
+    epidemiology, or diagnostic thresholds.
     """
     rng = np.random.default_rng(seed)
     age = rng.integers(18, 86, size=n)
     desired_bmi = np.clip(rng.normal(25.8 + 0.052 * (age - 45), 4.6), 17.0, 43.0)
-    # Create fictional measurements first; derive BMI exactly as for audience inputs.
+
+    # BMI is derived from the same measurements requested from participants.
     height_cm = np.round(np.clip(rng.normal(170, 9, size=n), 145, 200), 1)
     weight_kg = np.round(desired_bmi * (height_cm / 100.0) ** 2, 1)
     bmi = np.round(weight_kg / (height_cm / 100.0) ** 2, 1)
 
-    # Deliberately invented for the educational simulation.
-    synthetic_logit = -0.7 + 0.060 * (age - 50) + 0.145 * (bmi - 27)
-    p_yes = sigmoid(synthetic_logit)
-    hypertension = np.where(rng.random(n) < p_yes, "Yes", "No")
+    # Made-up classification rule, deliberately easy for a linear neuron.
+    # Older age and higher BMI move a point towards the synthetic 'Yes' class.
+    # The small noise term allows a few challenging cases near the boundary.
+    synthetic_score = 0.085 * (age - 50) + 0.23 * (bmi - 27) - 0.10
+    noisy_score = synthetic_score + rng.normal(0, SYNTHETIC_BOUNDARY_NOISE, size=n)
+    hypertension = np.where(noisy_score >= 0, "Yes", "No")
 
     return pd.DataFrame(
         {
@@ -229,18 +239,21 @@ st.title("🧠 How does a neural network learn? Age + BMI → Hypertension")
 st.write("Enter **Age, Height and Weight**. The app calculates **BMI = Weight (kg) / Height (m)²** automatically. The neuron then uses only **Age and BMI** as its two input features to predict a simulated label: **Hypertension (Yes / No)**.")
 st.warning("**Educational simulation — not a clinical prediction tool.** All initial records and their hypertension labels are invented. Age and BMI alone cannot diagnose hypertension; diagnosis requires blood-pressure assessment. Please use hypothetical examples only, not anyone’s real medical information.")
 
-if "demo_dataset" not in st.session_state:
+if ("demo_dataset" not in st.session_state or
+        st.session_state.get("synthetic_data_version") != SYNTHETIC_DATA_VERSION):
+    # Refresh older datasets automatically when switching to this code version.
     st.session_state.demo_dataset = generate_synthetic_dataset()
-    st.session_state.dataset_version = 0
+    st.session_state.dataset_version = st.session_state.get("dataset_version", -1) + 1
+    st.session_state.synthetic_data_version = SYNTHETIC_DATA_VERSION
 
 
 df = st.session_state.demo_dataset
 
 with st.expander("How were the synthetic data generated?", expanded=False):
     st.markdown("""
-    **Age** is simulated between 18 and 85 years. Fictional **Height (cm)** and **Weight (kg)** are generated, and **BMI** is calculated from them using the same formula as for the participant inputs. A deliberately invented probability formula is used to generate the binary **Hypertension** label, with randomness so that classes overlap.
+    **Age** is simulated between 18 and 85 years. Fictional **Height (cm)** and **Weight (kg)** are generated, and **BMI** is calculated from them using the same formula as for the participant inputs. A deliberately invented **linear classification rule** assigns the binary **Hypertension** label. A small amount of randomness is added close to the decision boundary, making the synthetic groups much easier to separate than real clinical data.
 
-    This formula is **not based on a clinical cohort, guidelines or European population prevalence**, and the demonstration must not be used for personal health assessment.
+    This rule is **not based on a clinical cohort, guidelines or European population prevalence**, and the demonstration must not be used for personal health assessment.
 
     The logistic neuron learns its own parameters from the simulated examples rather than receiving the original generating formula.
     """)
