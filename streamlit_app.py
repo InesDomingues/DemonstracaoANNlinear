@@ -235,9 +235,9 @@ def draw_neuron(state):
 # App and state
 # -----------------------------
 st.set_page_config(page_title="Age + BMI → Hypertension | ANN demonstration", page_icon="🧠", layout="wide")
-st.title("🧠 How does a neural network learn? Age + BMI → Hypertension")
+st.title("🧠 How does a neural network learn?")
 st.write("Enter **Age, Height and Weight**. The app calculates **BMI = Weight (kg) / Height (m)²** automatically. The neuron then uses only **Age and BMI** as its two input features to predict a simulated label: **Hypertension (Yes / No)**.")
-st.warning("**Educational simulation — not a clinical prediction tool.** All initial records and their hypertension labels are invented. Age and BMI alone cannot diagnose hypertension; diagnosis requires blood-pressure assessment. Please use hypothetical examples only, not anyone’s real medical information.")
+st.warning("**Educational simulation — not a clinical prediction tool.** All initial records and their hypertension labels are invented. Age and BMI alone cannot diagnose hypertension; diagnosis requires blood-pressure assessment.")
 
 if ("demo_dataset" not in st.session_state or
         st.session_state.get("synthetic_data_version") != SYNTHETIC_DATA_VERSION):
